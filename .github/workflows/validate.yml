@@ -1,0 +1,30 @@
+name: validate
+
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: validate JSON files
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          bad = []
+          for p in pathlib.Path(".").rglob("*.json"):
+              try:
+                  json.loads(p.read_text())
+              except Exception as e:
+                  bad.append((str(p), str(e)))
+          if bad:
+              for p, e in bad:
+                  print(f"INVALID {p}: {e}")
+              sys.exit(1)
+          print("all JSON valid")
+          PY
+      - name: crew CLI smoke test
+        run: |
+          python3 bin/crew init --name ci-smoke --role worker --caps "ci"
+          python3 bin/crew tasks-list
+          python3 bin/crew jobs-list

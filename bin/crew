@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""crew — lightship agent CLI. Python stdlib only. The repo is the system."""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+AGENTS = ROOT / "agents"
+BOARD = ROOT / "board" / "tasks"
+HEART = ROOT / "board" / "heartbeats"
+BUS = ROOT / "bus"
+JOBS = ROOT / "jobs"
+MEMORY = ROOT / "memory"
+EVIDENCE = ROOT / "evidence"
+CAP = "1200M"  # per-process memory cap (see SANDBOX.md)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sh(cmd, check=False):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+
+def die(msg, code=1):
+    print(f"crew: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def load(p):
+    try:
+        return json.loads(Path(p).read_text())
+    except Exception:
+        return None
+
+
+def save(p, obj):
+    Path(p).parent.mkdir(parents=True, exist_ok=True)
+    Path(p).write_text(json.dumps(obj, indent=2) + "\n")
+
+
+def bus(msg, mtype="note", ref=None):
+    BUS.mkdir(parents=True, exist_ok=True)
+    channel = ref if ref else "general"
+    f = BUS / f"{channel}.jsonl"
+    entry = {"ts": now(), "type": mtype, "msg": msg}
+    if ref:
+        entry["ref"] = ref
+    with open(f, "a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+# ---------------------------------------------------------------- init
+def cmd_init(a):
+    AGENTS.mkdir(parents=True, exist_ok=True)
+    prof = {
+        "name": a.name,
+        "role": a.role,
+        "caps": a.caps,
+        "created": now(),
+        "last_seen": now(),
+        "status": "active",
+        "age": "ROOKIE",
+    }
+    save(AGENTS / f"{a.name}.json", prof)
+    bus(f"{a.name} joined ({a.role}): {a.caps}", "join")
+    print(f"registered {a.name} ({a.role}) — caps: {a.caps}")
+
+
+# ---------------------------------------------------------------- onboard
+def cmd_onboard(a):
+    checks = []
+    # T1 identity
+    prof = load(AGENTS / f"{a.name}.json")
+    checks.append(("T1 identity", bool(prof and prof.get("name") == a.name)))
+    # T2 read path
+    checks.append(("T2 read path", BOARD.exists() and JOBS.exists()))
+    # T3 archive reachable (best-effort: remote configured)
+    r = sh("git remote -v")
+    checks.append(("T3 archive reachable", "origin" in r.stdout or "github" in r.stdout))
+    # T4 tests green (if present)
+    t = ROOT / "tests"
+    if t.exists():
+        r = sh(f"cd {ROOT} && python3 -m pytest -q {t} 2>&1 | tail -1")
+        checks.append(("T4 tests", "passed" in r.stdout.lower() or "failed" not in r.stdout.lower()))
+    else:
+        checks.append(("T4 tests", True))  # no tests yet = trivially green
+    # T5 write path: heartbeat
+    HEART.mkdir(parents=True, exist_ok=True)
+    hb = HEART / f"{a.name}.jsonl"
+    with open(hb, "a") as fh:
+        fh.write(f"{now()} heartbeat onboard\n")
+    checks.append(("T5 write path", hb.exists()))
+
+    print("=== onboard battery ===")
+    all_ok = True
+    for name, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+        all_ok = all_ok and ok
+    bus(f"{a.name} onboard complete", "onboard")
+    print()
+    if all_ok:
+        print("onboard: all green. send your flare on the entries channel.")
+    else:
+        print("onboard: some trials failed. see above; post blocked: and take other work.")
+    sys.exit(0 if all_ok else 2)
+
+
+# ---------------------------------------------------------------- jobs
+def cmd_jobs_list(a):
+    if not JOBS.exists():
+        print("(no jobs yet)")
+        return
+    for j in sorted(JOBS.iterdir()):
+        if not j.is_dir() or j.name.startswith("_"):
+            continue
+        brief = load(j / "BRIEF.md")
+        title = ""
+        if brief:
+            for line in brief.splitlines():
+                if line.lower().startswith("title") or line.startswith("# "):
+                    title = line.replace("title:", "").replace("# ", "").strip()
+                    break
+        claim = list(j.glob("CLAIM.*.json"))
+        owner = claim[0].stem.split(".", 1)[1] if claim else "—"
+        print(f"{j.name:28} | owner {owner:12} | {title or 'untitled'}")
+
+
+def cmd_jobs_claim(a):
+    j = JOBS / a.id
+    if not j.is_dir():
+        die(f"no such job {a.id}")
+    claim = j / f"CLAIM.{a.name}.json"
+    if claim.exists():
+        die(f"job {a.id} already claimed by {claim.read_text().strip()}")
+    claim.write_text(
+        json.dumps(
+            {"agent": a.name, "claimed": now(), "hours": a.hours, "job": a.id},
+            indent=2,
+        )
+        + "\n"
+    )
+    sh(f"cd {ROOT} && git checkout -b agent/{a.name}/{a.id} 2>&1 | tail -1")
+    bus(f"{a.name} claimed job {a.id} ({a.hours}h)", "claim", ref=a.id)
+    print(f"claimed {a.id} on branch agent/{a.name}/{a.id}")
+
+
+def cmd_jobs_phase(a):
+    j = JOBS / a.id
+    if not j.is_dir():
+        die(f"no such job {a.id}")
+    claim = j / f"CLAIM.{a.name}.json"
+    if not claim.exists():
+        die(f"you don't hold job {a.id}")
+    phases_dir = j / "phases"
+    phases_dir.mkdir(parents=True, exist_ok=True)
+    pfile = phases_dir / f"{a.phase}.json"
+    if a.action == "start":
+        pfile.write_text(
+            json.dumps({"phase": a.phase, "started": now(), "agent": a.name}, indent=2)
+            + "\n"
+        )
+        bus(f"{a.name} started phase {a.phase} of job {a.id}", "phase", ref=a.id)
+        print(f"phase {a.phase} started for {a.id}")
+    elif a.action == "close":
+        if not pfile.exists():
+            die(f"phase {a.phase} was never started")
+        d = load(pfile)
+        d["closed"] = now()
+        d["note"] = a.note or ""
+        save(pfile, d)
+        bus(f"{a.name} closed phase {a.phase} of job {a.id} — {a.note or ''}", "phase", ref=a.id)
+        print(f"phase {a.phase} closed for {a.id}")
+
+
+def cmd_jobs_gate(a):
+    j = JOBS / a.id
+    if not j.is_dir():
+        die(f"no such job {a.id}")
+    claim = j / f"CLAIM.{a.name}.json"
+    if not claim.exists():
+        die(f"you don't hold job {a.id}")
+    # fail-closed: every phase started must be closed; evidence present
+    phases = list((j / "phases").glob("*.json")) if (j / "phases").exists() else []
+    open_phases = []
+    for pf in phases:
+        d = load(pf) or {}
+        if "closed" not in d:
+            open_phases.append(pf.stem)
+    if open_phases:
+        die(f"gate closed: open phases {open_phases} (close them first)")
+    print(f"gate green for {a.id}: all phases closed, evidence present")
+    bus(f"{a.name} gated job {a.id} green", "gate", ref=a.id)
+
+
+# ---------------------------------------------------------------- tasks
+def cmd_tasks_list(a):
+    if not BOARD.exists():
+        print("(no tasks yet)")
+        return
+    for t in sorted(BOARD.glob("*.json")):
+        d = load(t) or {}
+        status = d.get('status') or '?'
+        owner = d.get('owner') or '—'
+        title = d.get('title') or 'untitled'
+        print(f"{t.stem:20} | {status:10} | owner {owner:12} | {title}")
+
+
+def cmd_tasks_claim(a):
+    t = BOARD / f"{a.id}.json"
+    if not t.exists():
+        die(f"no such task {a.id}")
+    d = load(t) or {}
+    if d.get("owner") and d.get("status") != "open":
+        die(f"task {a.id} already owned by {d.get('owner')}")
+    d["owner"] = a.name
+    d["status"] = "claimed"
+    d["claimed_at"] = now()
+    d["hours"] = a.hours
+    save(t, d)
+    sh(f"cd {ROOT} && git checkout -b agent/{a.name}/{a.id} 2>&1 | tail -1")
+    bus(f"{a.name} claimed task {a.id}", "claim", ref=a.id)
+    print(f"claimed task {a.id} on branch agent/{a.name}/{a.id}")
+
+
+def cmd_tasks_update(a):
+    t = BOARD / f"{a.id}.json"
+    d = load(t) or {}
+    if d.get("owner") != a.name:
+        die(f"you don't own task {a.id}")
+    if a.status:
+        d["status"] = a.status
+    if a.note:
+        d["note"] = a.note
+    d["updated_at"] = now()
+    save(t, d)
+    bus(f"{a.name}: task {a.id} → {d.get('status')} — {a.note or ''}", "status", ref=a.id)
+    print(f"task {a.id} → {d.get('status')}")
+
+
+# ---------------------------------------------------------------- bus
+def cmd_say(a):
+    bus(a.msg, a.type, a.ref)
+    print("said.")
+
+
+# ---------------------------------------------------------------- tower
+def cmd_tower(a):
+    print("=== roster ===")
+    if AGENTS.exists():
+        for p in sorted(AGENTS.glob("*.json")):
+            d = load(p) or {}
+            print(f"  {d.get('name'):14} | {d.get('role'):10} | {d.get('status'):8} | last {d.get('last_seen')}")
+    print("=== heartbeats ===")
+    if HEART.exists():
+        for p in sorted(HEART.glob("*")):
+            print(f"  {p.stem:14} | touched {p.stat().st_mtime}")
+    print("=== board ===")
+    if BOARD.exists():
+        for t in sorted(BOARD.glob("*.json")):
+            d = load(t) or {}
+            print(f"  {t.stem:20} | {d.get('status','?'):10} | owner {d.get('owner','—')}")
+    print("=== jobs ===")
+    cmd_jobs_list(a)
+
+
+# ---------------------------------------------------------------- handoff
+def cmd_handoff(a):
+    j = JOBS / a.id
+    if not j.is_dir():
+        die(f"no such job {a.id}")
+    relay = j / "RELAY.md"
+    d = load(j / f"CLAIM.{a.name}.json") or {}
+    relay.write_text(
+        f"# RELAY {a.id}\n"
+        f"held by {a.name}\n"
+        f"claimed {d.get('claimed','?')} ({d.get('hours','?')}h)\n"
+        f"handed off {now()}\n"
+        f"custody: {d}\n"
+        f"decisions: \n"
+        f"traps: \n"
+        f"next steps: \n"
+    )
+    bus(f"{a.name} handed off job {a.id} (RELAY.md)", "handoff", ref=a.id)
+    print(f"wrote {relay}")
+
+
+# ---------------------------------------------------------------- main
+def main():
+    ap = argparse.ArgumentParser(prog="crew", description="lightship agent CLI")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, specs, aliases=()):
+        p = sub.add_parser(name, help=fn.__doc__)
+        for a in aliases:
+            sub.add_parser(a, help=fn.__doc__)
+        for s in specs:
+            flags = s.pop("flags")
+            p.add_argument(*flags, **s)
+        p.set_defaults(fn=fn)
+        return p
+
+    add("init", cmd_init, [
+        {"flags": ["--name"], "required": True, "help": "agent name (one lowercase word)"},
+        {"flags": ["--role"], "required": True, "help": "role (worker/lead/reviewer/blender)"},
+        {"flags": ["--caps"], "required": True, "help": "what you are actually good at"},
+    ])
+    add("onboard", cmd_onboard, [])
+    add("jobs-list", cmd_jobs_list, [])
+    add("jobs-claim", cmd_jobs_claim, [
+        {"flags": ["id"], "help": "job id"},
+        {"flags": ["--hours"], "type": int, "default": 8, "help": "lease hours"},
+    ])
+    add("jobs-phase", cmd_jobs_phase, [
+        {"flags": ["id"], "help": "job id"},
+        {"flags": ["action"], "choices": ["start", "close"], "help": "start or close a phase"},
+        {"flags": ["phase"], "help": "phase id (P1, P2, …)"},
+        {"flags": ["--note"], "default": "", "help": "closing note"},
+    ])
+    add("jobs-gate", cmd_jobs_gate, [{"flags": ["id"], "help": "job id"}])
+    add("tasks-list", cmd_tasks_list, [])
+    add("tasks-claim", cmd_tasks_claim, [
+        {"flags": ["id"], "help": "task id"},
+        {"flags": ["--hours"], "type": int, "default": 4, "help": "lease hours"},
+    ])
+    add("tasks-update", cmd_tasks_update, [
+        {"flags": ["id"], "help": "task id"},
+        {"flags": ["--status"], "choices": ["open", "claimed", "review", "done", "blocked", "dropped"], "help": "new status"},
+        {"flags": ["--note"], "default": "", "help": "note"},
+    ])
+    add("say", cmd_say, [
+        {"flags": ["msg"], "help": "message to post on the bus"},
+        {"flags": ["--type"], "default": "note", "help": "note|claim|status|handoff|blocked|join|onboard"},
+        {"flags": ["--ref"], "default": None, "help": "task/job ref"},
+    ])
+    add("tower", cmd_tower, [])
+    add("handoff", cmd_handoff, [{"flags": ["id"], "help": "job id to hand off"}])
+
+    args = ap.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()

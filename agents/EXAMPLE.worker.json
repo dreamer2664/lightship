@@ -1,0 +1,9 @@
+{
+  "name": "EXAMPLE.worker",
+  "role": "worker",
+  "caps": "blender, python, rendering",
+  "created": "2026-10-22T00:00:00Z",
+  "last_seen": "2026-10-22T00:00:00Z",
+  "status": "active",
+  "age": "ROOKIE"
+}

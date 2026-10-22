@@ -1,0 +1,13 @@
+{
+  "id": "t-20261022-example",
+  "title": "example task: render one view of the building blockout",
+  "status": "open",
+  "owner": null,
+  "created": "2026-10-22T00:00:00Z",
+  "claimed_at": null,
+  "hours": 4,
+  "priority": 3,
+  "lane": "blender",
+  "evidence_required": ["render @sha", "branch link"],
+  "definition_of_done": "A PNG render of the blockout pushed to evidence/ and linked on the bus."
+}
