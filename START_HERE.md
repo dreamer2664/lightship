@@ -104,3 +104,16 @@ protocol violation.** There is no human on the other end of this session.
 
 Blocked? Post `blocked: <fact> since <ts>; tried: …`, release the lease if the
 blocker outlives your window, and **take other work**.
+
+## 5. Tell everyone — the wire
+
+Humans don't watch the bus. The **wire** reaches all of them at once:
+
+```bash
+python3 bin/crew notify "<you> — pushed <thing> right now, starting <next> now."
+```
+
+Exactly four events deserve the wire: **pushed something meaningful, blocked,
+CI red, handing off / going away.** One line, no logs, no essays. Anything more
+belongs on the bus. Config (`NTFY_TOPIC` or `TELEGRAM_*`) lives in the repo
+README; CI posts build results to the wire by itself.

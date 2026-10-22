@@ -37,6 +37,23 @@ open → claimed → review → done
         └─ dropped
 ```
 
+## The wire (contact everyone)
+
+The bus is for records. The **wire** is for humans. One command reaches everyone:
+
+```bash
+python3 bin/crew notify "lumen — pushed the facade render right now, starting the roof now."
+python3 bin/crew say "status" --type status --ref <id> --wire   # bus + wire together
+```
+
+- **Notify the wire on exactly four events:** you pushed something meaningful,
+  you are blocked, CI is red, you are handing off or going away.
+- **Message style:** `name — what happened right now, what you are doing now.`
+  One line. No markdown, no logs, no essays.
+- **Never** dump stack traces or file listings on the wire. Link the bus instead.
+- Backends: `ntfy` (set `NTFY_TOPIC`) or `telegram` (set `TELEGRAM_BOT_TOKEN` +
+  `TELEGRAM_CHAT_ID`). CI posts green/red results automatically.
+
 ## Liveness (short sessions)
 
 - Heartbeat every ~25 min (`tools/pulse.sh`). Any board write is also a heartbeat.

@@ -246,6 +246,10 @@ def cmd_tasks_update(a):
 # ---------------------------------------------------------------- bus
 def cmd_say(a):
     bus(a.msg, a.type, a.ref)
+    if a.wire:
+        r = sh(f'bash tools/notify.sh "{a.msg}"')
+        if r.returncode != 0:
+            print(r.stderr, end="")
     print("said.")
 
 
@@ -264,7 +268,9 @@ def cmd_tower(a):
     if BOARD.exists():
         for t in sorted(BOARD.glob("*.json")):
             d = load(t) or {}
-            print(f"  {t.stem:20} | {d.get('status','?'):10} | owner {d.get('owner','—')}")
+            owner = d.get('owner') or '—'
+            status = d.get('status') or '?'
+            print(f"  {t.stem:20} | {status:10} | owner {owner}")
     print("=== jobs ===")
     cmd_jobs_list(a)
 
@@ -288,6 +294,16 @@ def cmd_handoff(a):
     )
     bus(f"{a.name} handed off job {a.id} (RELAY.md)", "handoff", ref=a.id)
     print(f"wrote {relay}")
+
+
+# ---------------------------------------------------------------- notify
+def cmd_notify(a):
+    r = sh(f"bash tools/notify.sh \"{a.msg}\"")
+    if r.returncode != 0:
+        print(r.stderr, end="")
+        sys.exit(1)
+    print(r.stdout, end="")
+    bus(a.msg, "wire")
 
 
 # ---------------------------------------------------------------- main
@@ -337,6 +353,10 @@ def main():
         {"flags": ["msg"], "help": "message to post on the bus"},
         {"flags": ["--type"], "default": "note", "help": "note|claim|status|handoff|blocked|join|onboard"},
         {"flags": ["--ref"], "default": None, "help": "task/job ref"},
+        {"flags": ["--wire"], "action": "store_true", "help": "also send to the contact wire (ntfy/telegram)"},
+    ])
+    add("notify", cmd_notify, [
+        {"flags": ["msg"], "help": "message to send to the contact wire"},
     ])
     add("tower", cmd_tower, [])
     add("handoff", cmd_handoff, [{"flags": ["id"], "help": "job id to hand off"}])

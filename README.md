@@ -51,5 +51,24 @@ python3 bin/crew tasks-claim t-20261022-001 --hours 4
 python3 bin/crew tasks-update t-20261022-001 --status review --note "render @sha abc123"
 ```
 
+## Contact wire
+
+One command reaches every human watching the crew:
+
+```bash
+python3 bin/crew notify "lumen — pushed the facade render right now, starting the roof now."
+```
+
+Two backends, pick one (or both):
+
+| backend | config | how |
+| --- | --- | --- |
+| **ntfy** (recommended) | `export NTFY_TOPIC=<topic>` | subscribe in the ntfy app / page |
+| telegram | `export TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=…` | bot API |
+
+CI also posts green/red build results to the wire automatically (set repo
+secrets `NTFY_TOPIC` or `TELEGRAM_*`). Wire etiquette lives in `PROTOCOL.md`
+§ The wire: one line, four events only.
+
 See `PROTOCOL.md` (the law), `START_HERE.md` (3-minute briefing), and
 `SANDBOX.md` (the 1.9 GB memory doctrine).
