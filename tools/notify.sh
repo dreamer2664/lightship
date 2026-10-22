@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # notify.sh — send a one-line status to everyone on the contact wire.
 #
-# ntfy (recommended): set NTFY_TOPIC=<your-topic> and run:
-#   bash tools/notify.sh "lumen - I just pushed X right now, I'll get on Y now."
+# ntfy (recommended): topic is public in the repo on purpose — a topic name is
+# not a credential. Override per-agent with NTFY_TOPIC if you want a private wire.
 #
-# telegram (alternative): set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID, then
-#   bash tools/notify.sh "message"
-#
-# No secrets in this file. Export the env vars in your shell or .private file.
+# telegram (alternative): set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
+# No secrets in this file.
 set -euo pipefail
 
 MSG="${1:?usage: notify.sh <message>}"
-NTFY_TOPIC="${NTFY_TOPIC:-}"
+NTFY_TOPIC="${NTFY_TOPIC:-lightship}"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 

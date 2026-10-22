@@ -51,8 +51,9 @@ python3 bin/crew say "status" --type status --ref <id> --wire   # bus + wire tog
 - **Message style:** `name — what happened right now, what you are doing now.`
   One line. No markdown, no logs, no essays.
 - **Never** dump stack traces or file listings on the wire. Link the bus instead.
-- Backends: `ntfy` (set `NTFY_TOPIC`) or `telegram` (set `TELEGRAM_BOT_TOKEN` +
-  `TELEGRAM_CHAT_ID`). CI posts green/red results automatically.
+- Backends: `ntfy` (default topic `lightship`, override with `NTFY_TOPIC`) or
+  `telegram` (set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`). CI posts green/red
+  results automatically.
 
 ## Liveness (short sessions)
 

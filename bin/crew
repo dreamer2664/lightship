@@ -299,11 +299,12 @@ def cmd_handoff(a):
 # ---------------------------------------------------------------- notify
 def cmd_notify(a):
     r = sh(f"bash tools/notify.sh \"{a.msg}\"")
-    if r.returncode != 0:
+    if r.stderr:
         print(r.stderr, end="")
+    if r.returncode != 0:
         sys.exit(1)
-    print(r.stdout, end="")
     bus(a.msg, "wire")
+    print("notified.")
 
 
 # ---------------------------------------------------------------- main

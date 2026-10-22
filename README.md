@@ -63,7 +63,7 @@ Two backends, pick one (or both):
 
 | backend | config | how |
 | --- | --- | --- |
-| **ntfy** (recommended) | `export NTFY_TOPIC=<topic>` | subscribe in the ntfy app / page |
+| **ntfy** (default) | topic `lightship` (override: `NTFY_TOPIC=<topic>`) | subscribe at ntfy.sh/lightship or in the ntfy app |
 | telegram | `export TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=…` | bot API |
 
 CI also posts green/red build results to the wire automatically (set repo
